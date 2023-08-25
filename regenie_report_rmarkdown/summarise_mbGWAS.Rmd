@@ -90,7 +90,7 @@ cbind(names(opts_args), ifelse(Reduce(c, opts_args) == 1, "TRUE", ifelse(Reduce(
 
 ```{r get_pheno}
 
-pheno <- data.table::fread(
+pheno <- fread(
   file.path(res.path, "../validated_input/traits.validated.txt"), data.table = FALSE) %>% 
   mutate(FID = paste0("00", FID),
          IID = paste0("00", IID))
@@ -99,7 +99,7 @@ pheno <- data.table::fread(
 
 ```{r get_covs}
 
-covs <- data.table::fread(
+covs <- fread(
   file.path(res.path, "../validated_input/covariates.validated.txt"), data.table = FALSE) %>% 
   mutate(FID = paste0("00", FID),
          IID = paste0("00", IID))
@@ -683,13 +683,14 @@ pp$PLOT+
 ```
 
 ```{r generate_sections_prep, echo=FALSE, include=FALSE, eval=!opts_args$fast}
-source("/home/gantonello/bin/regenie_setup/customFunctions.GA.R")
+source("https://raw.githubusercontent.com/g-antonello/mbGWAS_regenie/main/customFunctions.GA.R")
 
 phy_stats <- fread(file.path(base.path, "regenie_input", "taxaStats.txt")) %>% 
   as.data.frame()
 
 taxaTab <- fread(file.path(base.path, "regenie_input", "taxaTable.txt")) %>% 
   as.data.frame()
+
 file.create(file.path(base.path, "regenie_report_rmarkdown", "progress.report.txt"))
 ```
 
