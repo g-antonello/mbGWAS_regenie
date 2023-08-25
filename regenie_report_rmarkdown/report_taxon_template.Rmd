@@ -1,0 +1,76 @@
+
+## `r paste0(taxon, "  (Prevalence: ", round(preval,3),")")`
+
+
+```{r}
+taxaTab[taxaTab[[ncol(taxaTab)]] == taxon,] %>% 
+  as_tibble() %>% 
+  select(-Kingdom) %>% 
+  .[rev(1:nrow(.)),] %>% 
+  kbl() %>% s
+  row_spec(0, bold = T)
+
+```
+
+### Histogram of Taxon
+
+```{r, opts_args$verbose}
+write_lines(
+  paste(gsub( "\\.[0-9]*$", "", as.character(Sys.time())), 
+  "Doing hist, Manhattan and QQ plots for", 
+  taxon,
+  paste0("(", grep(taxon, taxa_tested), " of ", taxa_tested_n, ")"),
+  sep ="\t"),
+  file = file.path(base.path, "regenie_report_rmarkdown", "progress.report.txt"),
+  append = TRUE
+  )
+
+```
+
+```{r taxon_distribution}
+m <- pheno %>% dplyr::summarise(m=mean(.data[[taxon]], na.rm=TRUE))
+shap <- shapiro.test(x = pheno[[taxon]])
+a <- hist(pheno[[taxon]], nclass=30, plot=FALSE)
+ppdist <- ggplot(pheno, aes_string(taxon)) + geom_histogram(fill="skyblue") + mytheme
+ppdist <- ppdist + labs(y="# samples") + geom_vline(aes(xintercept=m$m), lty=3)
+ppdist <- ppdist + annotate(
+  "text", 
+  x = max(pheno[[taxon]]) - 0.1 * max(pheno[[taxon]]), 
+  y=max(a$counts), 
+  label=paste0("shapiro_p =", format(shap$p.value, digits=3, scientific = TRUE)))
+print(ppdist)
+```
+
+### Manhattan plot
+
+```{r plot_manhattan, message=FALSE, warning=FALSE, fig.align="center", fig.width=10, fig.height=6}
+gwas_data_in <- fread(file.path(base.path, "results", "results", paste0(taxon, ".regenie.gz")), nThread = opts_args$threads-2)
+
+gwas_data_in %>%
+  filter(LOG10P > 2) %>%
+  
+  fastman::fastman_gg(
+    chr = "CHROM",
+    bp = "GENPOS",
+    p = "LOG10P",
+    logp = FALSE,
+    snp = "GENE_NAME",
+    speedup = T,
+    annotatePval = pval1,
+    suggestiveline = pval1,
+    genomewideline = pval2,
+    cex.text = 4,
+    repel = T,
+    colAbovePval = TRUE
+  )
+
+```
+
+### QQplot by Minor Allele Frequency
+
+```{r qqplot}
+
+myqqplot_mafbreak.GA(gwas_data_in, pvalcol = "LOG10P", log=TRUE, mafcol = "A1FREQ", title=paste0("QQPLOT - ", taxon))
+
+```
+

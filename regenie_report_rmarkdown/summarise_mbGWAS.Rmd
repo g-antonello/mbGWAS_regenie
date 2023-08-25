@@ -1,0 +1,709 @@
+---
+title: "mbGWAS on CHRISMB"
+subtitle: "`r paste('Genetic dataset:', genetic_dataset)`"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::robobook:
+    highlight: kate
+    toc_depth: 3
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+## Global Options
+
+opts <- options(
+  knitr.kable.NA = "",
+  knitr.duplicate.label = "allow")
+
+knitr::opts_chunk$set(
+  cache = FALSE,
+  cache.path = "/scratch/gantonello/regenie_cache/",
+  concordance = TRUE, 
+  prompt = FALSE, # fig.width=5, fig.height=5,
+  out.width = "100%",
+  echo = FALSE, 
+  warning = FALSE,
+  message = FALSE,
+  error = TRUE,
+  #fig.keep = "none",
+  tidy = FALSE,
+  comment = ""
+  )
+
+library(tidyverse)
+library(magrittr)
+library(stringr)
+library(forcats)
+library(plotly)
+library(knitr)
+library(DT)
+library(ggrepel)
+library(gridExtra)
+library(data.table)
+library(ggpubr)
+library(kableExtra)
+
+
+#------ Some basic setups ------
+
+maf_thresh <- 0.01
+
+#---- Set paths ----
+
+res.path <- file.path(base.path, "results", "results")
+tophits.path <- file.path(res.path, "tophits")
+pheno.path <- file.path(base.path, "regenie_input")
+plot.path <- file.path(res.path, "plots")
+report.path <- file.path(base.path, "regenie_report_markdown")
+
+# #---- Get useful functions ----
+source(file.path(base.path, "regenie_pipeline/bin/summarise_all_phenos.R"))
+# source("/home/gantonello/bin/regenie_setup/regenie_pipeline/bin/summarise_all_phenos.R")
+
+#---- ggplot theme ----
+mytheme <- theme_minimal() + theme(legend.position="top")
+
+
+#----- Get the number of Taxa needed for Principal Components to reach 95 % variance explained -------
+n_components <- tryCatch(readRDS(file.path(pheno.path, "n_components_0.95.rds")), warning = function(e) return(ifelse(grepl("ASV", base.path), 40, 14)))
+# 65 is a not-too-conservative number of ASVs it takes to reach 95% variance explained in PCoA eigendecomposition (MDS)
+# for genera it's 14
+
+pval1 <- ifelse(genetic_dataset == "WES", 5, -log10(5e-8)) %>% round(3)
+pval2 <- sum(pval1,log10(n_components)) %>% round(3)
+```
+
+```{r, eval=interactive()}
+opts_args <- list(fast = TRUE, plotly = FALSE, threads = 8, verbose = TRUE)
+```
+
+```{r}
+cbind(names(opts_args), ifelse(Reduce(c, opts_args) == 1, "TRUE", ifelse(Reduce(c, opts_args) == 0, "FALSE", Reduce(c, opts_args)))) %>% 
+  set_colnames(c("Flag", "Parameter")) %>% 
+  kbl(caption = "Arguments passed. 1 is TRUE, 0 is FALSE, other parameters ") %>% 
+  kable_styling()
+
+```
+
+```{r get_pheno}
+
+pheno <- data.table::fread(
+  file.path(res.path, "../validated_input/traits.validated.txt"), data.table = FALSE) %>% 
+  mutate(FID = paste0("00", FID),
+         IID = paste0("00", IID))
+
+```
+
+```{r get_covs}
+
+covs <- data.table::fread(
+  file.path(res.path, "../validated_input/covariates.validated.txt"), data.table = FALSE) %>% 
+  mutate(FID = paste0("00", FID),
+         IID = paste0("00", IID))
+
+```
+
+# GWAS run info
+
+```{r get sample size}
+
+n_samples <- read.table(file.path(base.path, "results", "logs", "traits.validated.log"), header = T)$Value
+covars <- colnames(covs)[3:ncol(covs)] %>% .[!grepl("PC[1-9]", .)]
+PCs <- colnames(covs)[3:ncol(covs)] %>% .[grepl("PC[1-9]", .)]
+phenos <- colnames(pheno)[3:ncol(pheno)]
+
+###### genetic data information ##########
+genotype_possibilities <- list("wes" = "WES 13K Imputed",
+                               "hrc" = "HRC 13K imputed", 
+                               "topmed" = "TOPMed 13K Imputed")
+
+config_possibilities  <- list("wes" = "regenie_base_conf_WES13K.config",
+                         "hrc" = "regenie_base_conf_HRC13K.config",
+                         "topmed" = "regenie_base_conf_TopMed13K.config")
+
+dataset_complete <- genotype_possibilities[[tolower(genetic_dataset)]]
+
+conf_file <- config_possibilities[[tolower(genetic_dataset)]]
+
+pval0 <- readLines(paste0(base.path, "regenie_pipeline/conf/",config_possibilities[[tolower(genetic_dataset)]])) %>% 
+  grep("log10p", ., value = T) %>% 
+  str_extract("=.*") %>% 
+  parse_number()
+
+############################################
+#### MAF and MAC info
+confFile <- readLines(file.path(base.path, "regenie_pipeline/conf", conf_file))
+
+MAC <- confFile %>% 
+  grep("mac", ., value = TRUE) %>% 
+  .[1] %>% 
+  strsplit("=") %>% 
+  .[[1]] %>% 
+  .[2]
+
+if(is.na(MAC)){
+  MAC <- grep("mac", readLines(file.path(base.path, "conf", "mygwas.conf")), value = TRUE) %>% 
+  .[1] %>% 
+  strsplit("=") %>% 
+  .[[1]] %>% 
+  .[2]
+}
+
+MAF <- confFile %>% 
+  grep("maf", ., value = TRUE) %>% 
+  .[1] %>% 
+  strsplit("=") %>% 
+  .[[1]] %>% 
+  .[2]
+
+if(is.na(MAF)){
+  MAF <- grep("maf", readLines(file.path(base.path, "conf", "mygwas.conf")), value = TRUE) %>% 
+  .[1] %>% 
+  strsplit("=") %>% 
+  .[[1]] %>% 
+  .[2]
+}
+
+signif_threshold <- as.numeric(confFile %>% 
+    grep("annotation_min_log10p", ., value = TRUE) %>% 
+    strsplit(" = ") %>% 
+    sapply("[",2)
+    )
+
+############################################
+signif_threshold <- as.numeric(signif_threshold)
+
+basic_info_mtx <- cbind(
+  c("Number of Phenotypes", "Number of samples", "Genotype dataset", "MAF filter", "MAC filter", "Covariates included", "Genetic PCs Covariates"),
+  c(length(phenos), n_samples, dataset_complete,  MAF, MAC, paste(covars, collapse = ",   "), paste(PCs, collapse = ",   "))
+  )
+
+
+kableExtra::kbl(basic_info_mtx) %>% 
+  kableExtra::kable_styling(bootstrap_options = c("bordered")) %>% 
+  kableExtra::column_spec(1, bold = T)
+
+```
+
+# Raw input table and MAF harmonization 
+
+  - Change MAF in case it's reversed (PLINK does this). So MAF (called `A1FREQ`) with values above 0.5 should be turned into `1- A1FREQ`
+  - Further filter `Top Hits` from `Log(P-value) > 5` to `Log(P-value) > 7.30` (nominal GWS P-values)
+  
+```{r read_tophits, cache=TRUE}
+# CHRISMB
+taxa_names <- list.files(file.path(res.path, "tophits"), pattern = "txt.gz", full.names = FALSE) %>% 
+  gsub(pattern = ".regenie.filtered.annotated.txt.gz", replacement =  "", x = ., fixed = TRUE)
+
+taxa_names <- list.files(file.path(res.path, "tophits"), pattern = ".gz", full.names = FALSE) %>% 
+  gsub(pattern = "\\.regenie.*", replacement =  "", x = .)
+
+tophits.df <- list.files(file.path(res.path, "tophits"), pattern = ".gz", full.names = TRUE) %>% 
+  lapply(function(path) fread(cmd = paste0("zcat ", path, "|", "sed 's/ /\t/g'"))) %>% 
+  set_names(taxa_names)
+
+tophits.df <- tophits.df[sapply(tophits.df, nrow)>0]
+
+# adjust MAF: all MAFs should be < 0.5, all values above were inverted
+tophits.df <- bind_rows(tophits.df, .id = "TAXON") %>% 
+  mutate(A1FREQ = ifelse(A1FREQ > 0.5, 1-A1FREQ, A1FREQ))
+
+
+## add microbiome statistics
+
+phy_stats <- read.table(file.path(base.path, "regenie_input/taxaStats.txt")) %>% 
+  mutate(taxon = make.names(taxon))
+
+tophits.df <- left_join(tophits.df, phy_stats %>% dplyr::rename("TAXON" = "taxon", "PREVALENCE" = grep("prevalence", colnames(phy_stats), value = T)) %>% dplyr::select(TAXON, PREVALENCE), by = "TAXON") %>% 
+  as_tibble() %>% 
+  filter(LOG10P >= pval1) %>% 
+  mutate(PREVALENCE = round(PREVALENCE, 3))
+```
+
+```{r, get variant annotation from Ensembl data, include=FALSE}
+
+# thanks Michele for setting up and API to download SNP annotations from Ensembl
+
+if(tolower(genetic_dataset) == "topmed") {
+  annotation_files <- tryCatch(
+    fread(
+      cmd = paste0(
+        "ls /scratch/compgen/data/genetics/CHRIS13K/Imputation/",
+        genetic_dataset,
+        paste0("/annotation/*.txt | grep -E '", paste("chr", sort(unique(tophits.df$CHROM)),"_", sep = "", collapse = "|"), "'"),
+        " | xargs cat",
+        " | grep -E '^chr'"
+      ),
+      sep = "\t",
+      na.strings = "-",
+      nThread = opts_args$threads
+    ),
+    error = function(e) {
+      return(NA) 
+    }
+  ) %>%
+    as_tibble()
+} else {
+  
+  annotation_files <- tryCatch(
+    fread(
+      cmd = paste0(
+        "ls /scratch/compgen/data/genetics/CHRIS13K/Imputation/",
+        genetic_dataset,
+        paste0("/annotation/*.txt | grep -E '", paste("chr", sort(unique(tophits.df$CHROM)),"_", sep = "", collapse = "|"), "'"),
+        " | xargs cat",
+        " | grep -E '^[1-9]'"
+      ),
+      sep = "\t",
+      na.strings = "-",
+      nThread = opts_args$threads
+    ),
+    error = function(e) {
+      return(NA)
+    }
+  ) %>%
+    as_tibble()
+}
+
+if(all(is.na(annotation_files))){
+  
+  tophits.df_annotated <- tophits.df %>% 
+    dplyr::rename(TAXON = TAXON) %>% dplyr::select(ID, TAXON, LOG10P, A1FREQ, GENE_NAME)
+  
+} else{
+  if(tolower(genetic_dataset) == "topmed"){
+  colnames_annotation <- readLines("/scratch/compgen/data/genetics/CHRIS13K/Imputation/TOPMed/annotation/chr1_gene_annotated.txt", n = 30)[30] %>% 
+    str_remove("#") %>% 
+    str_split("\t", simplify = T) %>% 
+    as.character()
+    
+    colnames(annotation_files) <- colnames_annotation
+
+  
+annotation_files_usefulCols <- dplyr::select(annotation_files, -contains("AF")) %>% 
+  dplyr::rename(ID = Location,
+                Gen.Element.Type = Feature_type)
+
+
+tophits.df_annotated <- left_join(tophits.df %>%
+                                dplyr::select(ID, TAXON, LOG10P, A1FREQ, GENE_NAME),
+                              
+                              annotation_files_usefulCols %>%
+                                select(-ID) %>% 
+                                rename(ID = Uploaded_variation), 
+                    by = "ID")
+    
+    } else {
+    
+  
+  colnames(annotation_files) <- c("Uploaded_variation", 
+                                  "Location",
+                                  "Allele", 
+                                  "Gene", "SYMBOL", 
+                                  "Feature", 
+                                  "Feature_type", 
+                                  "Existing_variation", 
+                                  "AF", 
+                                  "gnomAD_AF", 
+                                  "Consequence", 
+                                  "LoF", 
+                                  "CADD_PHRED", 
+                                  "CADD"
+                                  )
+
+  
+annotation_files_usefulCols <- dplyr::select(annotation_files, Location, Allele, Feature_type, Consequence, LoF) %>% 
+  dplyr::rename(ID = Location,
+                Gen.Element.Type = Feature_type,
+                LoF_Confidence = LoF)
+
+
+tophits.df_annotated <- left_join(tophits.df %>% mutate(ID2 = ID,
+                                                    ID = paste(CHROM, GENPOS, sep = ":")) %>% 
+                                dplyr::select(ID, TAXON, LOG10P, A1FREQ, GENE_NAME),
+                              
+                              annotation_files_usefulCols, 
+                    by = "ID")
+  }
+}
+
+rm(list = grep("annotation_files", ls(), value = T))
+
+tophits.df_annotated <- left_join(tophits.df_annotated, tophits.df %>% select(TAXON, ID, PREVALENCE), by = c("TAXON", "ID"))
+gc(verbose = F)
+```
+
+```{r}
+table_n <- 1
+
+tophits.df_annotated %>% 
+  select(TAXON, ID, LOG10P, A1FREQ, GENE_NAME, Existing_variation, Consequence) %>% 
+  DT::datatable(
+    escape = FALSE,
+    caption = paste0("Table ", table_n, " | ",
+                     "Raw top hits results for all traits at the same time. The gene name is automatically annotated by Regenie as the closes gene the variant sits on")
+    )
+
+table_n <- sum(table_n, 1)
+```
+
+Among the significant signals, what are the **Consequences** of that non-reference SNP and how many cases do we have?
+
+## Taxon-Gene pairs counts
+
+### Log10 P > `r round(pval1, 2)`
+
+```{r}
+
+tophits.df_annotated %>% 
+  group_by(TAXON, GENE_NAME) %>% 
+  reframe(
+    n_hits = n(),
+    LOG10P_range = paste(round(range(LOG10P), 2), collapse = " - "),
+    MAF_range = paste(format(range(A1FREQ), digits = 1, scientific = T), collapse = " - ")
+  ) %>% 
+  DT::datatable(caption = paste0("Table ", table_n, " | ",
+              "Top hits results for all traits at the same time. The gene name is automatically annotated by Regenie as the closes gene the variant sits on")
+              )
+
+table_n <- sum(table_n, 1)
+
+```
+
+### Log10 P > `r round(pval2, 2)`
+
+```{r}
+
+tophits.df_annotated %>% 
+  filter(LOG10P > pval2) %>% 
+  group_by(TAXON, GENE_NAME) %>% 
+  reframe(
+    n_hits = n(),
+    LOG10P_range = paste(round(range(LOG10P), 2), collapse = " - "),
+    MAF_range = paste(format(range(A1FREQ), digits = 1, scientific = T), collapse = " - ")
+  ) %>% 
+  DT::datatable(caption = paste0("Table ", table_n, " | ",
+              "Top hits results for all traits at the same time. The gene name is automatically annotated by Regenie as the closes gene the variant sits on")
+              )
+
+table_n <- sum(table_n, 1)
+```
+
+# Number of variants per trait, colored by MAF
+
+```{r}
+
+tophits.df_wCutoffs <- tophits.df %>%
+  mutate(MAF_cutoffs = cut(A1FREQ, c(1/10000, 1/1000, 1/100,1/10, 0.499)),
+         PVALUE_cutoffs = cut(LOG10P, round(min(LOG10P)+0.1, 0):round(max(LOG10P)+0.1, 0)),
+         PREVALENCE_cutoffs = cut(PREVALENCE, seq(0, 1, 0.1)),
+         PREVALENCE_cutoffs = ifelse(is.na(PREVALENCE_cutoffs), "Alpha-Diversities", as.character(PREVALENCE_cutoffs))) %>% 
+  filter(!is.na(MAF_cutoffs))
+  
+prevalences_by_signals_Pval1 <- tophits.df_wCutoffs %>% 
+  arrange(PREVALENCE) %>% 
+  mutate(taxon_preval = paste0(TAXON, " (prev: ", round(PREVALENCE, 3), ")")) %>% 
+  group_by(taxon_preval, MAF_cutoffs) %>% 
+  tally() %>% 
+  mutate(prevalence_value = parse_number(str_split(taxon_preval,pattern = " ", simplify = TRUE)[,3])) %>% 
+  
+  ggplot(aes(x = reorder(taxon_preval,desc(prevalence_value)), y = n, fill = MAF_cutoffs))+
+  geom_bar(stat = "identity")+
+  geom_text(aes(label = n), size = 3, hjust = 0, vjust = 0, position = "stack") +
+    theme(axis.text.x = element_text(angle = 60, hjust = 1))+
+  labs(x = "Taxa (by decreasing prevalence)",
+       y = "N of significant hits",
+       title = paste("P-value threshold:", pval1))+
+  scale_fill_discrete(type = ggsci::pal_jama()(5)[c(4,2,5)])
+
+if(isTRUE(opts_args$plotly)){
+  plotly::ggplotly(prevalences_by_signals_Pval1)  
+}else{
+  prevalences_by_signals_Pval1
+}
+
+if(nrow(tophits.df %>%
+        filter(LOG10P > pval2))> 0) {
+  tophits.df_wCutoffs <- tophits.df %>%
+    filter(LOG10P > pval2) %>%
+    mutate(
+      MAF_cutoffs = cut(A1FREQ, c(1 / 10000, 1 / 1000, 1 / 100, 1 / 10, 0.499)),
+      PVALUE_cutoffs = cut(LOG10P, round(min(LOG10P) + 0.1, 0):round(max(LOG10P) +
+                                                                       0.1, 0)),
+      PREVALENCE_cutoffs = cut(PREVALENCE, seq(0, 1, 0.1)),
+      PREVALENCE_cutoffs = ifelse(
+        is.na(PREVALENCE_cutoffs),
+        "Alpha-Diversities",
+        as.character(PREVALENCE_cutoffs)
+      )
+    ) %>%
+    filter(!is.na(MAF_cutoffs))
+  
+  prevalences_by_signals_Pval2 <- tophits.df_wCutoffs %>%
+    arrange(PREVALENCE) %>%
+    mutate(taxon_preval = paste0(TAXON, " (prev: ", round(PREVALENCE, 3), ")")) %>%
+    group_by(taxon_preval, MAF_cutoffs) %>%
+    tally() %>%
+    mutate(prevalence_value = parse_number(str_split(
+      taxon_preval, pattern = " ", simplify = TRUE
+    )[, 3])) %>%
+    
+    ggplot(aes(
+      x = reorder(taxon_preval, desc(prevalence_value)),
+      y = n,
+      fill = MAF_cutoffs
+    )) +
+    geom_bar(stat = "identity") +
+    geom_text(
+      aes(label = n),
+      size = 3,
+      hjust = 0,
+      vjust = 0,
+      position = "stack"
+    ) +
+    theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+    labs(
+      x = "Taxa (by decreasing prevalence)",
+      y = "N of significant hits",
+      title = paste("P-value threshold:", pval2)
+    ) +
+    scale_fill_discrete(type = ggsci::pal_jama()(5)[c(4, 2, 5)])
+  
+  if (isTRUE(opts_args$plotly)) {
+    plotly::ggplotly(prevalences_by_signals_Pval2)
+  } else{
+    prevalences_by_signals_Pval2
+  }
+}
+
+```
+
+# Results Tables
+
+## MAF $\geqslant$ `r maf_thresh*100`% {.tabset}
+
+### LOG10P > `r pval1`
+
+The result of the multiple GWAS were collected by Taxon and gene name in the following table. The `LOG10P` is the strongest P-value-ID association for each Taxon-Gene pair. Table of variants with Minor allele frequency higher than 1% (**MAF $\geqslant$ `r maf_thresh`**).
+
+```{r, Pnomin}
+
+
+tophits.df %>% 
+  filter(A1FREQ >= maf_thresh & LOG10P > pval1) %>% 
+  dplyr::rename(TAXON = TAXON) %>% 
+  group_by(TAXON, GENE_NAME) %>% 
+  summarise(
+    LOG10P=LOG10P[which.max(LOG10P)],
+    ID=ID[which.max(LOG10P)],
+    nvariants=n()) %>% 
+  arrange(-nvariants) %>% 
+  datatable(escape = FALSE, 
+            caption = paste0("Table ", table_n, " | ",
+              "Gene-taxon associations, counting all other associations in that gene-genus pair, significant or not. Results restricted only to FDR corrected variants variants with  MAF >= ", maf_thresh*100, "% AND LOG10P > ", pval1, "."))
+
+table_n <- sum(table_n, 1)
+```
+
+### LOG10P > `r pval2`
+
+The result of the multiple GWAS were collected by Taxon and gene name in the following table. The `LOG10P` is the strongest P-value-ID association for each Taxon-Gene pair. Table of variants with Minor allele frequency higher than 1% (**MAF $\geqslant$ `r maf_thresh`**).
+
+```{r}
+
+tophits.df %>% 
+  filter(A1FREQ >= maf_thresh & LOG10P > pval2) %>% 
+  dplyr::rename(TAXON = TAXON) %>% 
+  group_by(TAXON, GENE_NAME) %>% 
+  summarise(
+    LOG10P=LOG10P[which.max(LOG10P)],
+    ID=ID[which.max(LOG10P)],
+    nvariants=n()) %>% 
+  arrange(-nvariants) %>% 
+  datatable(escape = FALSE, 
+            caption = paste0("Table ", table_n, " | ",
+              "Gene-taxon associations, counting all other associations in that gene-genus pair, significant or not. Results restricted only to FDR corrected variants variants with  MAF >= ", maf_thresh*100, "% AND LOG10P > ", pval2, "."))
+
+table_n <- sum(table_n, 1)
+```
+
+## {-}
+
+## MAF $<$ `r maf_thresh*100`% {.tabset}
+
+### LOG10P > `r pval1`
+
+The result of the multiple GWAS were collected by Taxon and gene name in the following table. The `LOG10P` is the strongest P-value-ID association for each Taxon-Gene pair. Table of variants with Minor allele frequency higher than 1% (**MAF $\geqslant$ `r maf_thresh`**).
+
+```{r}
+
+
+tophits.df %>% 
+  filter(A1FREQ < maf_thresh & LOG10P > pval1) %>% 
+  dplyr::rename(TAXON = TAXON) %>% 
+  group_by(TAXON, GENE_NAME) %>% 
+  summarise(
+    LOG10P=LOG10P[which.max(LOG10P)],
+    ID=ID[which.max(LOG10P)],
+    nvariants=n()) %>% 
+  arrange(-nvariants) %>% 
+  datatable(escape = FALSE, 
+            caption = paste0("Table ", table_n, " | ",
+              "Gene-taxon associations, counting all other associations in that gene-genus pair, significant or not. Results restricted only to FDR corrected variants variants with  MAF >= ", maf_thresh*100, "% AND LOG10P > ", pval1, "."))
+
+table_n <- sum(table_n, 1)
+```
+
+### LOG10P > `r pval2`
+
+The result of the multiple GWAS were collected by Taxon and gene name in the following table. The `LOG10P` is the strongest P-value-ID association for each Taxon-Gene pair. Table of variants with Minor allele frequency higher than 1% (**MAF $\geqslant$ `r maf_thresh`**).
+
+```{r}
+
+tophits.df %>% 
+  filter(A1FREQ < maf_thresh & LOG10P > pval2) %>% 
+  dplyr::rename(TAXON = TAXON) %>% 
+  group_by(TAXON, GENE_NAME) %>% 
+  summarise(
+    LOG10P=LOG10P[which.max(LOG10P)],
+    ID=ID[which.max(LOG10P)],
+    nvariants=n()) %>% 
+  arrange(-nvariants) %>% 
+  datatable(escape = FALSE, 
+            caption = paste0("Table ", table_n, " | ",
+              "Gene-taxon associations, counting all other associations in that gene-genus pair, significant or not. Results restricted only to FDR corrected variants variants with  MAF >= ", maf_thresh*100, "% AND LOG10P > ", pval2, "."))
+
+table_n <- sum(table_n, 1)
+```
+
+## {-}
+
+# Manhattan plots
+
+All signals reported here are significant based on the threshold given to `Regenie`. So the y axis will start from the significance threshold. I have added one threshold that is the P-value after adjusting for the N° of features that are required to reach 95% of the variance explained on a PCoA, so that: $-\log_{10}(P_{corr}) = -\log_{10}(\frac{P}{n\ components})=$ `r signif_threshold+log10(n_components)`. In this case, the factor to correct by is `r n_components`.
+
+## MAF $\geqslant$ `r maf_thresh*100`%
+
+```{r plot_manhattan high MAF, cache=FALSE}
+
+tophits.df.sum <- tophits.df %>%
+  filter(A1FREQ >= maf_thresh) %>%
+  group_by(GENE_NAME) %>% arrange(desc(LOG10P)) %>%
+  summarise(TAXON.all=paste0(unique(TAXON), collapse=","),
+            LOG10P=max(LOG10P),
+            A1FREQ=A1FREQ[which.max(LOG10P)],
+            ID=ID[which.max(LOG10P)],
+            nprot=n_distinct(TAXON)) %>%
+  arrange(
+    desc(LOG10P)
+  ) %>% right_join(., tophits.df, by="ID", suffix=c(".locus", ""))
+
+tophits.df2 <-
+  tophits.df %>%
+  filter(A1FREQ >= maf_thresh) %>%
+  group_by(ID) %>%
+  summarise(
+    #TAXON=paste0(TAXON, collapse=","),
+    LOG10P=max(LOG10P),
+    GENPOS=GENPOS[which.max(LOG10P)],
+    CHROM=unique(CHROM),
+    taxon_name=unique(TAXON[which.max(LOG10P)]),
+    n=n_distinct(TAXON),
+    taxon_name=ifelse(n>1, paste0(taxon_name, "(+", n - 1, ")"), taxon_name),
+    GENLAB=paste( taxon_name, GENE_NAME[which.max(LOG10P)],sep="@")
+    ) %>%
+  left_join(tophits.df.sum, by="ID", suffix=c("", ".locus"))
+
+####### Manhattan Plot
+
+pp <- gg.man(tophits.df2,
+             pval.thr = signif_threshold,
+             phenocol="GENLAB",
+             pval.hline1 = pval1,
+             pval.hline2 = pval2,
+             spann = 1e5,
+             useplotly = opts_args$plotly)
+
+pp$PLOT +
+  labs(
+    title = paste("MAF >=", maf_thresh*100, "%")
+    )
+
+```
+
+## MAF $<$ `r maf_thresh*100` %
+
+```{r plot_manhattan low MAF, cache=FALSE}
+
+tophits.df.sum <- tophits.df %>%
+  filter(A1FREQ < maf_thresh) %>%
+  group_by(GENE_NAME) %>% arrange(desc(LOG10P)) %>%
+  summarise(TAXON.all=paste0(unique(TAXON), collapse=","),
+            LOG10P=max(LOG10P),
+            A1FREQ=A1FREQ[which.max(LOG10P)],
+            ID=ID[which.max(LOG10P)],
+            nhits=n_distinct(TAXON)) %>%
+  arrange(
+    desc(LOG10P)
+  ) %>% right_join(., tophits.df, by="ID", suffix=c(".locus", ""))
+
+tophits.df2 <-
+  tophits.df %>%
+  filter(A1FREQ < maf_thresh) %>%
+  group_by(ID) %>%
+  summarise(
+    #TAXON=paste0(TAXON, collapse=","),
+    LOG10P=max(LOG10P),
+    GENPOS=GENPOS[which.max(LOG10P)],
+    CHROM=unique(CHROM),
+    taxon_name=unique(TAXON[which.max(LOG10P)]),
+    n=n_distinct(TAXON),
+    taxon_name=ifelse(n>1, paste0(taxon_name, "(+", n - 1, ")"), taxon_name),
+    GENLAB=paste( taxon_name, GENE_NAME[which.max(LOG10P)],sep="@")
+    ) %>% left_join(tophits.df.sum, by="ID", suffix=c("", ".locus"))
+
+####### Manhattan Plot
+
+pp <- gg.man(tophits.df2,
+             pval.thr = signif_threshold,
+             phenocol="GENLAB",
+             pval.hline1 = pval1,
+             pval.hline2 = pval2,
+             spann = 1e5,
+             useplotly = opts_args$plotly)
+
+pp$PLOT+
+  labs(
+    title = paste("MAF <", maf_thresh*100, "%")
+    )
+
+```
+
+```{r generate_sections_prep, echo=FALSE, include=FALSE, eval=!opts_args$fast}
+source("/home/gantonello/bin/regenie_setup/customFunctions.GA.R")
+
+phy_stats <- fread(file.path(base.path, "regenie_input", "taxaStats.txt")) %>% 
+  as.data.frame()
+
+taxaTab <- fread(file.path(base.path, "regenie_input", "taxaTable.txt")) %>% 
+  as.data.frame()
+file.create(file.path(base.path, "regenie_report_rmarkdown", "progress.report.txt"))
+```
+
+
+```{r generate_sections, echo=FALSE, results='asis', eval=!opts_args$fast}
+cat("# Results by Taxon\n")
+
+taxa_tested <- sort(colnames(pheno[, 3:ncol(pheno)]))
+taxa_tested_n <- length(taxa_tested)
+
+for(taxon in taxa_tested) {
+  preval <- phy_stats[phy_stats$taxon == taxon, grep("prevalence", colnames(phy_stats), value = T)] %>% round(3)
+  res <- knit_child("report_taxon_template.Rmd", quiet = TRUE)
+  cat(res, sep = '\n')
+}
+
+```
