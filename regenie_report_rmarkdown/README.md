@@ -1,4 +1,5 @@
 0. This folder should be copied automatically by my setup, but in case, copy it manually into your folder
+
 ```
 git clone https://gitlab.gm.eurac.edu/gantonello/regenie_report_rmarkdown
 ```
@@ -32,6 +33,7 @@ sbatch -c16 --mem=32G -pslow /shared/bioinf/R/bin/Rscript-4.3-BioC3.17 render_su
 ```
 
 My personal preference is not to have interactive plots, to keep the report smaller. To keep it also complete, I choose to leave out the -f|--fast flag. For an eye on the progress, you can use the flag `-v|--verbose`, that will print when it is doing which plot in the per-trait section, at the end
+
 ```
 sbatch -c16 --mem=32G -pslow /shared/bioinf/R/bin/Rscript-4.3-BioC3.17 render_summarize_mbGWAS.R -t 16 -v
 ```

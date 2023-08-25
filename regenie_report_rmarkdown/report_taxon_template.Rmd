@@ -7,7 +7,7 @@ taxaTab[taxaTab[[ncol(taxaTab)]] == taxon,] %>%
   as_tibble() %>% 
   select(-Kingdom) %>% 
   .[rev(1:nrow(.)),] %>% 
-  kbl() %>% s
+  kbl() %>%
   row_spec(0, bold = T)
 
 ```
