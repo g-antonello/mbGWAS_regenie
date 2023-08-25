@@ -3,7 +3,8 @@ t0 <- Sys.time()
 library("optparse")
 
 option_list = list(
-  make_option(c("-b", "--base.dir"), type="character", default=NA, help = "Base directry"),
+  make_option(c("-i", "--input_phyloseq"), type="character", default="/shared/statgen/microbiome/CHRISMB/processed_data/microbiome_tables/phyloseq_built.Rds", help = "The path to the phyloseq object, stored as .rds"),  
+  make_option(c("-b", "--base.dir"), type="character", default=NA, help = "Base directory. It can either exist or it will be created."),  
   make_option(c("-l", "--level"), type="character", default="ASV", help = "Taxonomic level to aggregate to"),
   make_option(c("-g", "--genotype_dataset"), type="character", default=NA, help = "Genetic Dataset to use for the GWAS, no defaults allowed"),
   make_option(c("-t", "--transform"), type="character", default="irn", help = "Transformation to apply to your dataset"),
@@ -34,7 +35,7 @@ save(opts, file = file.path(opts$base.dir, "regenie_input", "setupObjects.Rda"))
 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 #----------- LOAD MICROBIOME BASIC DATA AND CHRIS METADATA --------------------
-chrismb_phy <- readRDS("/shared/statgen/microbiome/CHRISMB/processed_data/microbiome_tables/phyloseq_built.Rds") 
+chrismb_phy <- readRDS(opts_args$input_phyloseq) 
 sample_names(chrismb_phy) <- chrismb_phy@sam_data$AID
 
 chrismb_phy_core <- chrismb_phy %>% 
@@ -167,7 +168,7 @@ write.table(
   row.names = FALSE
 )
 
-write.table(phyloseq_ready_for_further_stuff,
+write.table(as.matrix(tax_table(phyloseq_ready_for_further_stuff)),
             file = file.path(opts$base.dir, "regenie_input", "taxaTable.txt"),
             sep = "\t", 
             quote = FALSE,
