@@ -1,3 +1,23 @@
+#' Thin summary statistics for faster plotting
+#' 
+#' This function makes qq-plot generation much faster. Careful: It must be applied only for visualization, not for quantile distribution generation and $\lambda$ calculation
+#'
+#' @param res.df \code{data.frame/tibble} containing GWAS summary statistics (essential is the p.value column) 
+#' @param p.col \code{character} with the variable name in the set
+#' @param log.p \code{logical} indicating whether p-values are as crude numbers or transformed as $-\log_{10}(P-value)$
+#' @param p.thresh Values of p-value up to which you want to thin the points. E.g. Default is 2, so all $0 \leqslant -\log_{10}(P-value) \leqslant 2$ will be thinned. If `log.p = TRUE`, then you should provide the crude p-value, which will then be thinned in the range $p_thresh \leqslant P-value \leqslant 1$
+#'
+#' @return A \code{data.frame} object with fewer dots to plot
+
+#' @export
+#'
+#' @examples
+#' 
+#' summary_stats <- data.table::fread("/path/to/regenie/summstats.regenie.gz", nThreads = 8)
+#' dim(summary_stats)
+#' 
+#' summars_stats_thinned <- thin_gwas_summStats(summary_stats, p.col = "LOG10P", log.p = T, p-thresh = 2)
+
 thin_gwas_summStats <- function(res.df, p.col, log.p = T, p.thresh = 2){
   if(!log.p){
     res.df <- mutate(res.df, 
@@ -30,6 +50,25 @@ thin_gwas_summStats <- function(res.df, p.col, log.p = T, p.thresh = 2){
   
 }
 
+
+#' QQ plot faster
+#'
+#'  QQ plot generation with a faster plotting thanks to the thinning strategy 
+#'  (used only in the plotting step). The rest of the function was designed by 
+#'  Michele Filosi and it is part of the gitlab repository regenie_pipeline
+#'
+#' @param df \code{data.frame} of the summary statistics with Minor Allele Frequency (MAF) and P-value columns
+#' @param mafbreaks \code{numeric} vector with the breaks to `cut` the MAF column 
+#' @param mafcol \code{character}, the column containing MAF data
+#' @param pvalcol \code{character}, the column containing P-value data
+#' @param log \code{logical} telling whether the P-value column is in Log10 base
+#' @param thin.p \code{logical} telling whether the data frame should be thinned or not. Default is `TRUE`. If set to FALSE, it is simply Michele Filosi's function
+#' @param title \code{character}, The title of the plot. Default is `QQPlot`
+#'
+#' @return
+#' @export
+#'
+#' @examples
 myqqplot_mafbreak.GA <- function(
     df,
     mafbreaks=c(0, 0.0005, 0.005, 0.05, 1),

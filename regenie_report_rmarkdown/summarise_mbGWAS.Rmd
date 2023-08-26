@@ -341,6 +341,7 @@ table_n <- 1
 
 tophits.df_annotated %>% 
   select(TAXON, ID, LOG10P, A1FREQ, GENE_NAME, Existing_variation, Consequence) %>% 
+  arrange(desc(LOG10P)) %>% 
   DT::datatable(
     escape = FALSE,
     caption = paste0("Table ", table_n, " | ",
@@ -365,6 +366,7 @@ tophits.df_annotated %>%
     LOG10P_range = paste(round(range(LOG10P), 2), collapse = " - "),
     MAF_range = paste(format(range(A1FREQ), digits = 1, scientific = T), collapse = " - ")
   ) %>% 
+  arrange(desc(n_hits)) %>% 
   DT::datatable(caption = paste0("Table ", table_n, " | ",
               "Top hits results for all traits at the same time. The gene name is automatically annotated by Regenie as the closes gene the variant sits on")
               )
