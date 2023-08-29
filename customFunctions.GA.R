@@ -169,3 +169,13 @@ myqqplot <- function(
   
   return(qqp)
 }
+
+### two utilities to make html links for the reports
+
+link_GeneCards <- function(val) {
+  paste0('<a href="https://www.genecards.org/cgi-bin/carddisp.pl?gene=', val,'">', val, '</a')
+}
+
+link_DBSNP <- function(rsID) {
+  paste0('<a href="https://www.ncbi.nlm.nih.gov/snp/', rsID,'">', rsID, '</a')
+}

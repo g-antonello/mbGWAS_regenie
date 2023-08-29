@@ -214,7 +214,7 @@ tophits.df <- bind_rows(tophits.df, .id = "TAXON") %>%
 
 ## add microbiome statistics
 
-phy_stats <- read.table(file.path(base.path, "regenie_input/taxaStats.txt")) %>% 
+phy_stats <- read.table(file.path(base.path, "regenie_input/taxaStats.txt"), header = T) %>% 
   mutate(taxon = make.names(taxon))
 
 tophits.df <- left_join(tophits.df, phy_stats %>% dplyr::rename("TAXON" = "taxon", "PREVALENCE" = grep("prevalence", colnames(phy_stats), value = T)) %>% dplyr::select(TAXON, PREVALENCE), by = "TAXON") %>% 
@@ -333,6 +333,28 @@ tophits.df_annotated <- left_join(tophits.df %>% mutate(ID2 = ID,
 rm(list = grep("annotation_files", ls(), value = T))
 
 tophits.df_annotated <- left_join(tophits.df_annotated, tophits.df %>% select(TAXON, ID, PREVALENCE), by = c("TAXON", "ID"))
+
+
+# load variation effect
+annotation_impact <- readLines("/scratch/compgen/data/genetics/CHRIS13K/Imputation/TOPMed/gene_level_ref/masks/gene_level_analysis_regenie_TOPMed_freq_0.1_chrall.masks") %>%
+  str_split(pattern = "\t",simplify = T) %>% 
+  .[,2] %>% 
+  strsplit(split = ",", fixed = T) %>% 
+  set_names(c("high", "moderate", "low")) %>% 
+  unlist() %>% 
+  as.data.frame() %>% 
+  rownames_to_column("Impact") %>% 
+  set_names(c("Impact", "Consequence")) %>% 
+  mutate(Impact = str_extract(pattern = "[a-z]*", Impact))
+
+
+tophits.df_annotated <- left_join(
+  tophits.df_annotated,
+  annotation_impact, 
+  by = "Consequence"
+  ) %>% 
+  relocate("Impact", .after = "Consequence")
+
 gc(verbose = F)
 ```
 

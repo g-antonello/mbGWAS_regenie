@@ -1,7 +1,6 @@
 
 ## `r paste0(taxon, "  (Prevalence: ", round(preval,3),")")`
 
-
 ```{r}
 taxaTab[taxaTab[[ncol(taxaTab)]] == taxon,] %>% 
   as_tibble() %>% 
@@ -11,6 +10,24 @@ taxaTab[taxaTab[[ncol(taxaTab)]] == taxon,] %>%
   row_spec(0, bold = T)
 
 ```
+
+### Table of Top Hits (No P-value filter)
+
+```{r, results='asis'}
+
+fread(file.path(res.path, "tophits", paste0(taxon, ".regenie.filtered.gz"))) %>% 
+  mutate(
+    A1FREQ = ifelse(A1FREQ > 0.5, 1-A1FREQ, A1FREQ),
+    GENE_NAME = link_GeneCards(GENE_NAME),
+    RSID = link_DBSNP(RSID)
+    ) %>% 
+  select(CHROM, GENPOS, ID, RSID, A1FREQ, BETA, LOG10P, GENE_NAME, DISTANCE) %>% 
+  arrange(desc(LOG10P)) %>% 
+  mutate() %>% 
+  datatable(escape = FALSE)
+
+```
+
 
 ### Histogram of Taxon
 
