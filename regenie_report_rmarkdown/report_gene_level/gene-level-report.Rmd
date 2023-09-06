@@ -1,7 +1,6 @@
 ---
-title: "r paste('Gene-level mbGWAS,', taxLvl, 'level')"
-subtitle: "r paste(genetic_dataset)"
-
+title: "`r paste('Gene-level mbGWAS,', taxLvl, 'level')`"
+subtitle: "`r paste(genetic_dataset)`"
 date: "`r Sys.Date()`"
 output:
   rmdformats::robobook:
@@ -55,7 +54,7 @@ res.path <- file.path(base.path, "results", "results")
 
 ```{r}
 library(optparse)
-opts_args <- list(fast = TRUE, plotly = FALSE, threads = 8, verbose = TRUE, statistical_test = "ADD-SKATO-ACAT")
+opts_args <- list(fast = TRUE, plotly = FALSE, threads = 8, verbose = TRUE, statistical_test = "ADD-SKATO-ACAT", p_value_threshold = 5)
 ```
 
 ```{r}
@@ -64,7 +63,7 @@ files <- list.files(res.path, pattern = "regenie.gz$", full.names = T)
 # pre-filter p-values < 1e-5, which in Log(P) is 5
 
 system.time(
-files_readIn <- lapply(files, function(x) fread(cmd = paste0("zcat ", x, " | awk '{if ($12 > 5) {print}}'"), nThread = opts_args$threads/2)) %>% 
+files_readIn <- lapply(files, function(x) fread(cmd = paste0("zcat ", x, " | awk '{if ($12 > ", opts_args$p_value_threshold, ") {print}}'"), nThread = ceiling(opts_args$threads/2))) %>% 
   set_names(gsub(".regenie.gz", "", basename(files), fixed = T)) %>% 
   .[sapply(., nrow) > 0] %>% 
   bind_rows(.id = "TAXON") %>% 
@@ -80,6 +79,8 @@ input_significant_hits  <- files_readIn %>%
   left_join(taxonomy_info %>% rename(TAXON = taxLvl) %>% select(any_of(c("TAXON", "Species", "Phylum"))), by = "TAXON") %>% 
   filter(TEST == opts_args$statistical_test)
 
+
+datatable(input_significant_hits)
 ```
 
 
@@ -109,15 +110,7 @@ regenie_gene_annotation <- fread('/scratch/compgen/data/genetics/CHRIS13K/Imputa
   ) %>% 
   left_join(data.frame(impact = names(veps_impact), VEP_annot = veps_impact), by = "VEP_annot") %>% 
   rename(GENE = Gene)
-# 
-# input_significant_hits <- input_significant_hits %>% 
-#   left_join(
-#     regenie_gene_annotation , 
-#     by = c("CHROM", "GENPOS"), 
-#     relationship = "many-to-many"
-#     )
-# 
-# datatable(input_significant_hits)
+
 ```
 
 # Number of variants tested per locus (gene)
@@ -128,7 +121,7 @@ regenie_gene_annotation %>%
   group_by(GENE, impact) %>% 
   tally() %>% 
   pivot_wider(names_from = "impact", values_from = "n") %>% 
-  datatable(caption = "Number of variants for each impact predicted by VEP. These are the variants tested with Gene-level analysis, these are NOT results")
+  datatable(caption = "Number of variants for each impact predicted by VEP. These are the variants tested with Gene-level analysis, NOT the results")
 ```
 
 # Gene level analysis: significant genes
