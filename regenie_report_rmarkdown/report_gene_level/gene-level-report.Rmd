@@ -12,6 +12,7 @@ editor_options:
 ---
 
 ```{r setup, include=FALSE}
+
 ## Global Options
 
 opts <- options(
@@ -37,7 +38,6 @@ library(tidyverse)
 library(magrittr)
 library(stringr)
 library(forcats)
-library(plotly)
 library(knitr)
 library(DT)
 library(ggrepel)
@@ -48,22 +48,80 @@ library(kableExtra)
 ```
 
 ```{r paths setup, include=FALSE}
-base.path <- ".."
 res.path <- file.path(base.path, "results", "results")
 ```
 
-```{r}
+```{r, eval = interactive()}
 library(optparse)
-opts_args <- list(fast = TRUE, plotly = FALSE, threads = 8, verbose = TRUE, statistical_test = "ADD-SKATO-ACAT", p_value_threshold = 5)
+opts_args <- list(statistical_test = "ADD-SKATO-ACAT", threads = 8, p_value_threshold = "autoFind", verbose = TRUE, log10 = TRUE)
+```
+
+```{r}
+
+regenie_gene_masks <- grep("regenie_gene_masks", basic_setup_gene_level, value = T) %>% 
+  str_extract("\\'.*") %>% 
+  gsub("'", "", .) %>% 
+  readLines()
+
+# format veps impact prediction #########
+veps <- str_split(regenie_gene_masks, pattern = "\t", simplify = T) %>% .[,2] %>% 
+  sapply(str_split, ",", simplify = T)
+
+veps_impact_names <- str_split(regenie_gene_masks, pattern = "\t", simplify = T) %>% .[,1]
+
+veps_impact <- lapply(1:length(veps), function(i) set_names(veps[[i]], rep(veps_impact_names[[i]], length(veps[[i]])))) %>% 
+  unlist()
+
+rm(veps)
+
+##############################################################################
+
+regenie_gene_annotation <- grep("regenie_gene_anno", basic_setup_gene_level, value = T) %>% 
+  str_extract("\\'.*") %>%
+  gsub("'", "", .) %>%
+  fread(
+    nThread = ceiling(opts_args$threads/4*3)
+    ) %>% 
+  set_names(c("ID_variant_full", "Gene", "VEP_annot")) %>% 
+  mutate(
+    GENPOS = str_split(ID_variant_full, ":", simplify = T) %>% .[, 2] %>% as.integer(),
+    CHROM = str_extract(ID_variant_full, "^.*\\:[0-9]") %>% gsub("\\:[0-9]", "", .) %>% parse_number()
+  ) %>% 
+  left_join(data.frame(impact = names(veps_impact), VEP_annot = veps_impact), by = "VEP_annot") %>% 
+  rename(GENE = Gene)
+
+
+##########################################
+#------------------
+variants_per_gene <- regenie_gene_annotation %>% 
+  filter(!is.na(impact)) %>%
+  group_by(GENE, impact) %>% 
+  tally() %>% 
+  pivot_wider(names_from = "impact", values_from = "n") %>% 
+  select(GENE, any_of(rev(veps_impact_names)))
+
+
+
+variants_per_gene_filtered <- variants_per_gene[rowSums(is.na(variants_per_gene[-1])) < 3,]
+
+if(opts_args$p_value_threshold=="autoFind"){
+opts_args$p_value_threshold <- 0.05/nrow(variants_per_gene_filtered)*(1/readRDS(file.path(base.path, "..", "regenie_input", "n_components_0.95.rds")))
+}
 ```
 
 ```{r}
 
 files <- list.files(res.path, pattern = "regenie.gz$", full.names = T) 
-# pre-filter p-values < 1e-5, which in Log(P) is 5
+
+if(opts_args$log10){
+    opts_args$p_value_threshold <- round(-log10(opts_args$p_value_threshold),3)
+    awk_command_readIn <- paste0(" | awk '{if ($12 > ", opts_args$p_value_threshold, ") {print}}'")
+} else{
+      awk_command_readIn <- paste0(" | awk '{if ($12 < ", opts_args$p_value_threshold, ") {print}}'")
+}
 
 system.time(
-files_readIn <- lapply(files, function(x) fread(cmd = paste0("zcat ", x, " | awk '{if ($12 > ", opts_args$p_value_threshold, ") {print}}'"), nThread = ceiling(opts_args$threads/2))) %>% 
+files_readIn <- lapply(files, function(x) fread(cmd = paste0("zcat ", x, awk_command_readIn), nThread = ceiling(opts_args$threads/2))) %>% 
   set_names(gsub(".regenie.gz", "", basename(files), fixed = T)) %>% 
   .[sapply(., nrow) > 0] %>% 
   bind_rows(.id = "TAXON") %>% 
@@ -79,49 +137,17 @@ input_significant_hits  <- files_readIn %>%
   left_join(taxonomy_info %>% rename(TAXON = taxLvl) %>% select(any_of(c("TAXON", "Species", "Phylum"))), by = "TAXON") %>% 
   filter(TEST == opts_args$statistical_test)
 
-
-datatable(input_significant_hits)
-```
-
-
-
-```{r}
-
-regenie_gene_masks <- readLines('/scratch/compgen/data/genetics/CHRIS13K/Imputation/TOPMed/gene_level_ref/masks/gene_level_analysis_regenie_TOPMed_freq_0.1_chrall.masks')
-
-# format veps impact prediction #########
-veps <- str_split(regenie_gene_masks, pattern = "\t", simplify = T) %>% .[,2] %>% 
-  sapply(str_split, ",", simplify = T)
-
-veps_impact <- str_split(regenie_gene_masks, pattern = "\t", simplify = T) %>% .[,1]
-
-veps_impact <- lapply(1:length(veps), function(i) set_names(veps[[i]], rep(veps_impact[[i]], length(veps[[i]])))) %>% 
-  unlist()
-
-rm(veps)
-
-##############################################################################
-
-regenie_gene_annotation <- fread('/scratch/compgen/data/genetics/CHRIS13K/Imputation/TOPMed/gene_level_ref/masks/gene_level_analysis_regenie_TOPMed_freq_0.1_chrall.annot', nThread = opts_args$threads/2*3) %>% 
-  set_names(c("ID_variant_full", "Gene", "VEP_annot")) %>% 
-  mutate(
-    GENPOS = str_split(ID_variant_full, ":", simplify = T) %>% .[, 2] %>% as.integer(),
-    CHROM = str_extract(ID_variant_full, "^.*\\:[0-9]") %>% gsub("\\:[0-9]", "", .) %>% parse_number()
-  ) %>% 
-  left_join(data.frame(impact = names(veps_impact), VEP_annot = veps_impact), by = "VEP_annot") %>% 
-  rename(GENE = Gene)
-
+source("https://raw.githubusercontent.com/g-antonello/mbGWAS_regenie/main/customFunctions.GA.R")
+datatable(input_significant_hits %>% 
+            mutate(GENE = link_GeneCards(GENE)), 
+          caption = paste0("list of significant associations with -log10(P-value) >", format.pval(opts_args$p_value_threshold, digits = 1)),
+          escape = FALSE)
 ```
 
 # Number of variants tested per locus (gene)
 
 ```{r}
-regenie_gene_annotation %>% 
-  filter(!is.na(impact)) %>%
-  group_by(GENE, impact) %>% 
-  tally() %>% 
-  pivot_wider(names_from = "impact", values_from = "n") %>% 
-  datatable(caption = "Number of variants for each impact predicted by VEP. These are the variants tested with Gene-level analysis, NOT the results")
+datatable(variants_per_gene_filtered, caption = "Number of variants for each impact predicted by VEP. These are the variants tested with Gene-level analysis, NOT the results")
 ```
 
 # Gene level analysis: significant genes
@@ -129,15 +155,11 @@ regenie_gene_annotation %>%
 ```{r}
 
 input_significant_hits %>% 
-  group_by(TAXON, MASK) %>% 
-  summarise(
-    `Low Impact` = sum(grepl("low", MASK)),
-    `Moderate Impact` = sum(grepl("moderate", MASK)),
-    `High Impact` = sum(grepl("high", MASK))
-  ) %>% 
-  ungroup() %>% 
-  select(-MASK) %>% 
-  datatable(caption = "Number of gene-ASV associations significant at P-value < 1e-5")
+  group_by(TAXON, GENE, MASK) %>%
+  summarise(LOG10P = round(LOG10P, 2)) %>% 
+  pivot_wider(names_from = MASK, values_from = LOG10P) %>% 
+  mutate_at(vars(all_of(contains("impact"))), .funs = function(x) ifelse(is.na(x), "", x)) %>% 
+  datatable(caption = paste("P-values of the association for each ASV-gene-mask combination. Empty fields are non-significant associations (P-value below the chosen threshold:", opts_args$p_value_threshold))
 
 ```
 
