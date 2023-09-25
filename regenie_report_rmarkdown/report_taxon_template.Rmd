@@ -2,7 +2,7 @@
 ## `r paste0(taxon, "  (Prevalence: ", round(preval,3),")")`
 
 ```{r, eval=opts_args$verbose}
-cat("\n", as.character(Sys.time()) %>% gsub("\\..*", "", .), taxon, paste(which(taxa_tested == taxon), "out of", taxa_tested_n), 
+cat("\n", as.character(Sys.time()) %>% gsub("\\..*", "", .), taxon, paste(which(taxa_tested == taxon), "out of", taxa_tested_n, "\n"), 
     sep = "\t", 
     file = slurm_file, 
     append = T)
@@ -23,7 +23,7 @@ taxaTab[taxaTab[[ncol(taxaTab)]] == taxon,] %>%
 
 ```{r, results='asis'}
 
-fread(file.path(res.path, "tophits", paste0(taxon, ".regenie.filtered.gz"))) %>% 
+fread(file.path(res.path, "tophits", paste0(taxon, ".regenie.filtered.gz")), fill = T) %>% 
   select(CHROM, GENPOS, ID, RSID, A1FREQ, BETA, LOG10P, GENE_NAME, DISTANCE) %>% 
   arrange(desc(LOG10P)) %>% 
   mutate(
