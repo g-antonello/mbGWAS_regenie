@@ -37,7 +37,6 @@ library(tidyverse)
 library(magrittr)
 library(stringr)
 library(forcats)
-library(plotly)
 library(knitr)
 library(DT)
 library(ggrepel)
@@ -202,14 +201,17 @@ taxa_names <- list.files(file.path(res.path, "tophits"), pattern = ".gz", full.n
   gsub(pattern = "\\.regenie.*", replacement =  "", x = .)
 
 tophits.df <- list.files(file.path(res.path, "tophits"), pattern = ".gz", full.names = TRUE) %>% 
-  lapply(function(path) fread(cmd = paste0("zcat ", path, "|", "sed 's/ /\t/g'"))) %>% 
+  lapply(function(path) fread(cmd = paste0("zcat ", path, "|", "sed 's/ /\t/g'"))) %>%
+  # remove the GENE_CHROMOSOME info, which is already in the variant name
+  lapply(select, -GENE_CHROMOSOME, -GENE_START, -GENE_END, -DISTANCE) %>% 
   set_names(taxa_names)
 
 tophits.df <- tophits.df[sapply(tophits.df, nrow)>0]
 
 # adjust MAF: all MAFs should be < 0.5, all values above were inverted
 tophits.df <- bind_rows(tophits.df, .id = "TAXON") %>% 
-  mutate(A1FREQ = ifelse(A1FREQ > 0.5, 1-A1FREQ, A1FREQ))
+  mutate(A1FREQ = ifelse(A1FREQ > 0.5, 1-A1FREQ, A1FREQ)) %>% 
+  filter(LOG10P > pval1)
 
 
 ## add microbiome statistics
@@ -356,6 +358,7 @@ tophits.df_annotated <- left_join(
   relocate("Impact", .after = "Consequence")
 
 gc(verbose = F)
+
 ```
 
 ```{r}
@@ -724,6 +727,11 @@ cat("# Results by Taxon\n")
 
 taxa_tested <- sort(colnames(pheno[, 3:ncol(pheno)]))
 taxa_tested_n <- length(taxa_tested)
+
+if(opts_args$verbose){
+  slurm_file <- list.files(base.path, "report", full.names = TRUE,recursive = F) %>% 
+    list.files("slurm", full.names = T)
+}
 
 for(taxon in taxa_tested) {
   preval <- phy_stats[phy_stats$taxon == taxon, grep("prevalence", colnames(phy_stats), value = T)] %>% round(3)

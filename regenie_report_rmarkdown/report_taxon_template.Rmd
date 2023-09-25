@@ -1,6 +1,14 @@
 
 ## `r paste0(taxon, "  (Prevalence: ", round(preval,3),")")`
 
+```{r, eval=opts_args$verbose}
+cat("\n", as.character(Sys.time()) %>% gsub("\\..*", "", .), taxon, paste(which(taxa_tested == taxon), "out of", taxa_tested_n), 
+    sep = "\t", 
+    file = slurm_file, 
+    append = T)
+```
+
+
 ```{r}
 taxaTab[taxaTab[[ncol(taxaTab)]] == taxon,] %>% 
   as_tibble() %>% 
@@ -11,19 +19,19 @@ taxaTab[taxaTab[[ncol(taxaTab)]] == taxon,] %>%
 
 ```
 
-### Table of Top Hits (No P-value filter)
+### Table of Top Hits (GWS P-value, unadjusted)
 
 ```{r, results='asis'}
 
 fread(file.path(res.path, "tophits", paste0(taxon, ".regenie.filtered.gz"))) %>% 
+  select(CHROM, GENPOS, ID, RSID, A1FREQ, BETA, LOG10P, GENE_NAME, DISTANCE) %>% 
+  arrange(desc(LOG10P)) %>% 
   mutate(
     A1FREQ = ifelse(A1FREQ > 0.5, 1-A1FREQ, A1FREQ),
     GENE_NAME = link_GeneCards(GENE_NAME),
     RSID = link_DBSNP(RSID)
     ) %>% 
-  select(CHROM, GENPOS, ID, RSID, A1FREQ, BETA, LOG10P, GENE_NAME, DISTANCE) %>% 
-  arrange(desc(LOG10P)) %>% 
-  mutate() %>% 
+  filter(LOG10P > pval1) %>% 
   datatable(escape = FALSE)
 
 ```
