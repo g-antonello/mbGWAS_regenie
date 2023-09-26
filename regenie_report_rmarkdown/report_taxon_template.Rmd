@@ -21,7 +21,7 @@ taxaTab[taxaTab[[ncol(taxaTab)]] == taxon,] %>%
 
 ### Table of Top Hits (GWS P-value, unadjusted)
 
-```{r, results='asis'}
+```{r}
 
 fread(file.path(res.path, "tophits", paste0(taxon, ".regenie.filtered.gz")), fill = T) %>% 
   select(CHROM, GENPOS, ID, RSID, A1FREQ, BETA, LOG10P, GENE_NAME, DISTANCE) %>% 

@@ -38,6 +38,7 @@ genetic_dataset <- list("hrc" = "HRC",
      "topmed" = "TOPMed")[[sapply(c("hrc","wes", "topmed"), function(d) str_extract(tolower(base.path), d)) %>% 
   .[!is.na(.)]]]
 
+
 cat("\nGenetic dataset used:", genetic_dataset, sep = "\t")
 
 render(list.files(base.path, recursive=T, pattern="summarise_mbGWAS", full.names = TRUE),

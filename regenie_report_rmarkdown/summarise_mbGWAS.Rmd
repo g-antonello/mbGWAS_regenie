@@ -105,7 +105,9 @@ covs <- fread(
 
 ```
 
-# GWAS run info
+# Run information {.tabset}
+
+## GWAS run info
 
 ```{r get sample size}
 
@@ -187,7 +189,7 @@ kableExtra::kbl(basic_info_mtx) %>%
 
 ```
 
-# Raw input table and MAF harmonization 
+## Raw input table and MAF harmonization 
 
   - Change MAF in case it's reversed (PLINK does this). So MAF (called `A1FREQ`) with values above 0.5 should be turned into `1- A1FREQ`
   - Further filter `Top Hits` from `Log(P-value) > 5` to `Log(P-value) > 7.30` (nominal GWS P-values)
@@ -378,9 +380,9 @@ table_n <- sum(table_n, 1)
 
 Among the significant signals, what are the **Consequences** of that non-reference SNP and how many cases do we have?
 
-## Taxon-Gene pairs counts
+# Taxon-Gene pairs counts {.tabset}
 
-### Log10 P > `r round(pval1, 2)`
+## Log10 P > `r round(pval1, 2)`
 
 ```{r}
 
@@ -400,7 +402,7 @@ table_n <- sum(table_n, 1)
 
 ```
 
-### Log10 P > `r round(pval2, 2)`
+## Log10 P > `r round(pval2, 2)`
 
 ```{r}
 
@@ -418,6 +420,8 @@ tophits.df_annotated %>%
 
 table_n <- sum(table_n, 1)
 ```
+
+# {-}
 
 # Number of variants per trait, colored by MAF
 
